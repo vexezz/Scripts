@@ -1,0 +1,130 @@
+
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+local elevator = script.Parent
+local button = elevator:FindFirstChild("button", true)
+local platform = elevator:FindFirstChild("BASE", true)
+
+local HEIGHT = 40
+local TRAVEL_TIME = 6
+
+local buttonPart = button:IsA("BasePart")
+	and button
+	or button:FindFirstChildWhichIsA("BasePart", true)
+
+local platformPart = platform:IsA("BasePart")
+	and platform
+	or platform:FindFirstChildWhichIsA("BasePart", true)
+
+local prompt = button:FindFirstChildWhichIsA("ProximityPrompt", true)
+
+if not prompt then
+	prompt = Instance.new("ProximityPrompt")
+	prompt.Parent = buttonPart
+end
+
+prompt.ActionText = "Go Up"
+prompt.ObjectText = "Elevator"
+prompt.KeyboardKeyCode = Enum.KeyCode.E
+prompt.MaxActivationDistance = 12
+prompt.RequiresLineOfSight = false
+prompt.HoldDuration = 0
+
+local startPivot = elevator:GetPivot()
+local topPivot = startPivot + Vector3.new(0, HEIGHT, 0)
+
+local moving = false
+local atTop = false
+
+local function getPassengers()
+	local passengers = {}
+
+	local overlap = OverlapParams.new()
+	overlap.FilterType = Enum.RaycastFilterType.Exclude
+	overlap.FilterDescendantsInstances = {elevator}
+
+	local region = platformPart.CFrame * CFrame.new(
+		0,
+		platformPart.Size.Y / 2 + 3,
+		0
+	)
+
+	local size = Vector3.new(
+		platformPart.Size.X,
+		6,
+		platformPart.Size.Z
+	)
+
+	for _, part in ipairs(workspace:GetPartBoundsInBox(region, size, overlap)) do
+		local character = part:FindFirstAncestorOfClass("Model")
+		local player = character and Players:GetPlayerFromCharacter(character)
+
+		if player and not passengers[character] then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+			if root and humanoid and humanoid.Health > 0 then
+				passengers[character] = root
+			end
+		end
+	end
+
+	return passengers
+end
+
+local function moveElevator(destination)
+	local origin = elevator:GetPivot()
+	local passengers = getPassengers()
+
+	local value = Instance.new("NumberValue")
+	local previous = origin
+
+	local connection = value.Changed:Connect(function(alpha)
+		local current = origin:Lerp(destination, alpha)
+		local delta = current * previous:Inverse()
+
+		elevator:PivotTo(current)
+
+		for character, root in pairs(passengers) do
+			if character.Parent and root.Parent then
+				root.CFrame = delta * root.CFrame
+			else
+				passengers[character] = nil
+			end
+		end
+
+		previous = current
+	end)
+
+	local tween = TweenService:Create(
+		value,
+		TweenInfo.new(
+			TRAVEL_TIME,
+			Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut
+		),
+		{Value = 1}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	connection:Disconnect()
+	elevator:PivotTo(destination)
+	value:Destroy()
+end
+
+prompt.Triggered:Connect(function()
+	if moving then return end
+
+	moving = true
+	prompt.Enabled = false
+
+	moveElevator(atTop and startPivot or topPivot)
+
+	atTop = not atTop
+	prompt.ActionText = atTop and "Go Down" or "Go Up"
+	prompt.Enabled = true
+	moving = false
+end)
