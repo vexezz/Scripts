@@ -1,0 +1,130 @@
+
+local TweenService = game:GetService("TweenService")
+
+local switch = script.Parent
+local lever = switch:WaitForChild("Lever")
+local lightModel = workspace:WaitForChild("Light")
+
+local FADE_TIME = 0.5
+local FLIP_TIME = 0.2
+local FLIP_ANGLE = 35
+local OFF_COLOR = Color3.fromRGB(65, 60, 55)
+
+local part = lever:FindFirstChildWhichIsA("BasePart", true)
+local prompt = part:FindFirstChildOfClass("ProximityPrompt")
+
+if not prompt then
+	prompt = Instance.new("ProximityPrompt")
+	prompt.Parent = part
+end
+
+prompt.ActionText = "Turn Off"
+prompt.ObjectText = "Light Switch"
+prompt.KeyboardKeyCode = Enum.KeyCode.E
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 10
+prompt.RequiresLineOfSight = false
+
+local lights = {}
+local effects = {}
+local neonParts = {}
+
+local isOn = true
+local busy = false
+
+for _, object in ipairs(lightModel:GetDescendants()) do
+	if object:IsA("Light") then
+		table.insert(lights, {
+			instance = object,
+			brightness = object.Brightness,
+			enabled = object.Enabled
+		})
+	elseif object:IsA("Beam") or object:IsA("ParticleEmitter") or object:IsA("Trail") then
+		table.insert(effects, {
+			instance = object,
+			enabled = object.Enabled
+		})
+	elseif object:IsA("BasePart") and object.Material == Enum.Material.Neon then
+		table.insert(neonParts, {
+			instance = object,
+			color = object.Color,
+			material = object.Material
+		})
+	end
+end
+
+local leverUp = lever:GetPivot()
+local leverDown = leverUp * CFrame.Angles(0, 0, math.rad(FLIP_ANGLE))
+
+local leverValue = Instance.new("CFrameValue")
+leverValue.Value = leverUp
+
+leverValue.Changed:Connect(function(value)
+	lever:PivotTo(value)
+end)
+
+local function tween(object, duration, properties)
+	local animation = TweenService:Create(
+		object,
+		TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+		properties
+	)
+
+	animation:Play()
+	return animation
+end
+
+local function toggleLights()
+	if busy then return end
+
+	busy = true
+	isOn = not isOn
+	prompt.Enabled = false
+
+	tween(leverValue, FLIP_TIME, {
+		Value = isOn and leverUp or leverDown
+	})
+
+	for _, data in ipairs(lights) do
+		local light = data.instance
+		light.Enabled = isOn and data.enabled or true
+
+		tween(light, FADE_TIME, {
+			Brightness = isOn and data.brightness or 0
+		})
+	end
+
+	for _, data in ipairs(effects) do
+		data.instance.Enabled = isOn and data.enabled
+	end
+
+	for _, data in ipairs(neonParts) do
+		local part = data.instance
+
+		if not isOn then
+			part.Material = Enum.Material.SmoothPlastic
+		end
+
+		tween(part, FADE_TIME, {
+			Color = isOn and data.color or OFF_COLOR
+		})
+	end
+
+	task.wait(FADE_TIME)
+
+	if isOn then
+		for _, data in ipairs(neonParts) do
+			data.instance.Material = data.material
+		end
+	else
+		for _, data in ipairs(lights) do
+			data.instance.Enabled = false
+		end
+	end
+
+	prompt.ActionText = isOn and "Turn Off" or "Turn On"
+	prompt.Enabled = true
+	busy = false
+end
+
+prompt.Triggered:Connect(toggleLights)
