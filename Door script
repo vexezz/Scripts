@@ -1,0 +1,108 @@
+
+local TweenService = game:GetService("TweenService")
+
+local door = script.Parent
+
+local OPEN_ANGLE = 90
+local OPEN_TIME = 0.8
+local AUTO_CLOSE = true
+local CLOSE_DELAY = 3
+local INTERACTION_DISTANCE = 10
+
+local isOpen = false
+local isMoving = false
+local closeVersion = 0
+
+local closedPivot = door:GetPivot()
+local openPivot = closedPivot * CFrame.Angles(0, math.rad(OPEN_ANGLE), 0)
+
+local promptPart
+
+if door:IsA("BasePart") then
+	promptPart = door
+elseif door:IsA("Model") then
+	promptPart = door.PrimaryPart or door:FindFirstChildWhichIsA("BasePart", true)
+end
+
+if not promptPart then
+	warn("Door needs at least one BasePart")
+	return
+end
+
+local prompt = Instance.new("ProximityPrompt")
+prompt.ActionText = "Open"
+prompt.ObjectText = "Door"
+prompt.KeyboardKeyCode = Enum.KeyCode.E
+prompt.MaxActivationDistance = INTERACTION_DISTANCE
+prompt.RequiresLineOfSight = false
+prompt.Parent = promptPart
+
+local pivotValue = Instance.new("CFrameValue")
+pivotValue.Value = closedPivot
+
+pivotValue:GetPropertyChangedSignal("Value"):Connect(function()
+	door:PivotTo(pivotValue.Value)
+end)
+
+local tweenInfo = TweenInfo.new(
+	OPEN_TIME,
+	Enum.EasingStyle.Sine,
+	Enum.EasingDirection.InOut
+)
+
+local function moveDoor(targetPivot)
+	if isMoving then
+		return
+	end
+
+	isMoving = true
+	prompt.Enabled = false
+
+	local tween = TweenService:Create(
+		pivotValue,
+		tweenInfo,
+		{ Value = targetPivot }
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	isMoving = false
+	prompt.Enabled = true
+end
+
+prompt.Triggered:Connect(function()
+	if isMoving then
+		return
+	end
+
+	closeVersion += 1
+
+	if isOpen then
+		isOpen = false
+		prompt.ActionText = "Open"
+		moveDoor(closedPivot)
+	else
+		isOpen = true
+		prompt.ActionText = "Close"
+		moveDoor(openPivot)
+
+		if AUTO_CLOSE then
+			local currentVersion = closeVersion
+
+			task.delay(CLOSE_DELAY, function()
+				if not isOpen or isMoving then
+					return
+				end
+
+				if currentVersion ~= closeVersion then
+					return
+				end
+
+				isOpen = false
+				prompt.ActionText = "Open"
+				moveDoor(closedPivot)
+			end)
+		end
+	end
+end)
