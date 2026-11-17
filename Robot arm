@@ -1,0 +1,186 @@
+
+local TweenService = game:GetService("TweenService")
+
+local robot = script.Parent
+local assembly = robot:WaitForChild("MovingAssembly")
+local control = robot:WaitForChild("Control button")
+
+local platform1 = workspace:WaitForChild("Platform1")
+local platform2 = workspace:WaitForChild("Platform2")
+local box = workspace:WaitForChild("Box")
+
+local grip = assembly:FindFirstChild("GripPoint", true)
+assert(grip and grip:IsA("BasePart"), "GripPoint missing")
+assert(box:IsA("BasePart"), "Box must be a Part")
+
+local button = control:FindFirstChild("red button", true)
+
+if button and not button:IsA("BasePart") then
+	button = button:FindFirstChildWhichIsA("BasePart", true)
+end
+
+assert(button, "Red button missing")
+
+local prompt = button:FindFirstChildOfClass("ProximityPrompt")
+
+if not prompt then
+	prompt = Instance.new("ProximityPrompt")
+	prompt.Parent = button
+end
+
+prompt.ActionText = "Move Box"
+prompt.ObjectText = "Robotic Arm"
+prompt.KeyboardKeyCode = Enum.KeyCode.E
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 12
+prompt.RequiresLineOfSight = false
+prompt.Enabled = true
+
+local ROTATE_TIME = 2
+local PICKUP_TIME = 1
+local PLACE_TIME = 1
+local PAUSE_TIME = 0.3
+
+local busy = false
+local homePivot = assembly:GetPivot()
+local pivotPosition = homePivot.Position
+local homeGripDirection = grip.Position - pivotPosition
+
+local function boxOnPlatform(platform)
+	return CFrame.new(
+		platform.Position.X,
+		platform.Position.Y + platform.Size.Y / 2 + box.Size.Y / 2,
+		platform.Position.Z
+	)
+end
+
+local function normalizeAngle(angle)
+	return (angle + math.pi) % (2 * math.pi) - math.pi
+end
+
+local function targetAngle(worldPosition)
+	local target = worldPosition - pivotPosition
+
+	local startAngle = math.atan2(
+		homeGripDirection.X,
+		homeGripDirection.Z
+	)
+
+	local endAngle = math.atan2(
+		target.X,
+		target.Z
+	)
+
+	return normalizeAngle(endAngle - startAngle)
+end
+
+local function pivotAtAngle(angle)
+	return CFrame.new(pivotPosition)
+		* CFrame.Angles(0, angle, 0)
+		* CFrame.new(-pivotPosition)
+		* homePivot
+end
+
+local function tweenBox(target, duration)
+	local tween = TweenService:Create(
+		box,
+		TweenInfo.new(
+			duration,
+			Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut
+		),
+		{CFrame = target}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+end
+
+local function tweenAngle(startAngle, endAngle, carrying)
+	local difference = normalizeAngle(endAngle - startAngle)
+	local boxOffset
+
+	if carrying then
+		boxOffset = grip.CFrame:ToObjectSpace(box.CFrame)
+	end
+
+	local value = Instance.new("NumberValue")
+	value.Value = 0
+
+	local connection = value.Changed:Connect(function(alpha)
+		local angle = startAngle + difference * alpha
+
+		assembly:PivotTo(pivotAtAngle(angle))
+
+		if carrying then
+			box.CFrame = grip.CFrame * boxOffset
+		end
+	end)
+
+	local tween = TweenService:Create(
+		value,
+		TweenInfo.new(
+			ROTATE_TIME,
+			Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut
+		),
+		{Value = 1}
+	)
+
+	tween:Play()
+	tween.Completed:Wait()
+
+	connection:Disconnect()
+	value:Destroy()
+
+	local finalAngle = startAngle + difference
+	assembly:PivotTo(pivotAtAngle(finalAngle))
+
+	if carrying then
+		box.CFrame = grip.CFrame * boxOffset
+	end
+
+	return finalAngle
+end
+
+local function run()
+	if busy then return end
+
+	busy = true
+	prompt.Enabled = false
+
+	local success, err = pcall(function()
+		box.Anchored = true
+		box.CFrame = boxOnPlatform(platform1)
+
+		local angle1 = targetAngle(box.Position)
+		local angle2 = targetAngle(platform2.Position)
+
+		local currentAngle = tweenAngle(0, angle1, false)
+
+		task.wait(PAUSE_TIME)
+
+		tweenBox(grip.CFrame, PICKUP_TIME)
+
+		task.wait(PAUSE_TIME)
+
+		currentAngle = tweenAngle(currentAngle, angle2, true)
+
+		task.wait(PAUSE_TIME)
+
+		tweenBox(boxOnPlatform(platform2), PLACE_TIME)
+
+		task.wait(PAUSE_TIME)
+
+		tweenAngle(currentAngle, 0, false)
+	end)
+
+	if not success then
+		warn(err)
+	end
+
+	busy = false
+	prompt.Enabled = true
+end
+
+prompt.Triggered:Connect(run)
